@@ -1,11 +1,18 @@
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+from config import TRACK_STATUS_NEW, TRACK_STATUS_MODIFIED
 import bot
+from Yoku.yoku.scrape import prettify_timestamp
+from Yoku.yoku.consts import KEY_START_TIMESTAMP, KEY_END_TIMESTAMP, KEY_POST_TIMESTAMP
 import uvicorn
 import json
 
+from mercapi import Mercapi
+from mercapi.requests.search import SearchRequestData
+
 app = FastAPI(title="Yambot Tracking API")
+m = Mercapi()
 
 class TrackItem(BaseModel):
     site: str # 'mercari' or 'yahoo_auctions'
@@ -16,6 +23,28 @@ class TrackItem(BaseModel):
 
 class ExcludeRequest(BaseModel):
     item_id: str
+
+class InputItem(BaseModel):
+    url: str
+    row_number: int
+    item: str
+    facebook: str
+
+class OutputItem(BaseModel):
+    url: str
+    row_number: int
+    item: str
+    facebook: str
+    status: str
+
+class SearchItemResult(BaseModel):
+    name: str
+    price: str
+    url: str
+
+class SearchResponse(BaseModel):
+    num_found: int
+    items: List[SearchItemResult]
 
 @app.get("/track")
 def trigger_tracking():
@@ -35,7 +64,11 @@ def trigger_tracking():
         
         for item, status in items:
             # Mercari items are custom objects (Item), Yahoo ones are standard dicts
-            item_data = item.__dict__ if hasattr(item, "__dict__") else item
+            item_data = dict(item.__dict__) if hasattr(item, "__dict__") else dict(item)
+            
+            for ts_key in [KEY_START_TIMESTAMP, KEY_END_TIMESTAMP, KEY_POST_TIMESTAMP, "created", "updated"]:
+                if ts_key in item_data and isinstance(item_data[ts_key], int):
+                    item_data[f"{ts_key}_formatted"] = prettify_timestamp(item_data[ts_key])
             
             entry_res["changes"].append({
                 "status": status,
@@ -77,6 +110,7 @@ def add_config(item: TrackItem):
     else:
         raise HTTPException(status_code=400, detail="Site must be 'mercari' or 'yahoo_auctions'")
         
+    new_entry["last_result"] = {}
     track_json.append(new_entry)
     bot.save_json_to_file(track_json, bot.RESULT_PATH)
     return {"success": True, "message": "Added successfully", "entry": new_entry}
@@ -109,6 +143,54 @@ def exclude_item(req: ExcludeRequest):
     bot.save_json_to_file(track_json, bot.RESULT_PATH)
     return {"success": True, "message": f"Item {req.item_id} excluded from future results."}
 
+
+@app.post("/item", response_model=List[OutputItem])
+async def get_status(data: List[InputItem]):
+    results = []
+    for item in data:
+        try:
+            item_id = item.url.strip().split("/")[-1]
+            details = await m.item(item_id)
+            status = details.status  # <-- dùng property status của Item object
+
+            results.append({
+                "url": item.url,
+                "row_number": item.row_number,
+                "item": item.item,
+                "facebook": item.facebook,
+                "status": status
+            })
+        except Exception as e:
+            results.append({
+                "url": item.url,
+                "row_number": item.row_number,
+                "item": item.item,
+                "facebook": item.facebook,
+                "status": f"error: {str(e)}"
+            })
+    return results
+
+@app.get("/search", response_model=SearchResponse)
+async def search_items(query: str, on_sale: bool = False):
+    try:
+        status_list = [SearchRequestData.Status.STATUS_ON_SALE] if on_sale else []
+        results = await m.search(query, status=status_list)
+        
+        items = []
+        for item in results.items:
+            items.append({
+                "name": item.name,
+                "price": str(item.price),
+                "url": f"https://jp.mercari.com/item/{item.id_}"
+            })
+            
+        return {
+            "num_found": results.meta.num_found,
+            "items": items
+        }
+    except Exception as e:
+        return {"num_found": 0, "items": []}
+
 if __name__ == "__main__":
-    print("Starting Yambot API on http://0.0.0.0:8000")
+    print("Starting combined Yambot/Mercapi API on http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -13,7 +13,7 @@ from mercari.mercari.mercari import MercariItemStatus, Item
 from Yoku.yoku.consts import KEY_TITLE, KEY_IMAGE, KEY_URL, KEY_POST_TIMESTAMP, KEY_END_TIMESTAMP, KEY_START_TIMESTAMP, KEY_ITEM_ID, KEY_BUYNOW_PRICE, KEY_CURRENT_PRICE, KEY_START_PRICE, KEY_BID_COUNT
 from Yoku.yoku.scrape import prettify_timestamp
 
-from config import *
+from config import SITE_MERCARI, SITE_YAHOO_AUCTIONS, LEVEL_ABSOLUTELY_UNIQUE, LEVEL_UNIQUE, LEVEL_AMBIGUOUS, MERCARI_CATEGORY_CD, MERCARI_CATEGORY_BLURAY, YAHOO_CATEGORY_MUSIC, YAHOO_CATEGORY_CD, TRACK_STATUS_NEW, TRACK_STATUS_MODIFIED
 from json_utils import load_file_to_json
 
 class EmailConfig:
@@ -170,6 +170,18 @@ def prettify(type_: str, value) -> str:
     else:
         return str(value)
 
+def format_status(status_dict):
+    if isinstance(status_dict, str):
+        return status_dict
+    if status_dict.get("type") == "new":
+        return TRACK_STATUS_NEW
+    elif status_dict.get("type") == "modified":
+        mods = []
+        for k, v in status_dict.get("changes", {}).items():
+            mods.append(f"{prettify(k, v['old'])}->{prettify(k, v['new'])}")
+        return f"{TRACK_STATUS_MODIFIED}({', '.join(mods)})"
+    return str(status_dict)
+
 def send_tracking_email (config: EmailConfig, email_items: List[Tuple[Dict, List[Tuple[Item, str]]]]):
     # email_items: list of tuple(entry, list of tuple(Item, status))
     mail_message = MIMEMultipart()
@@ -190,11 +202,12 @@ def send_tracking_email (config: EmailConfig, email_items: List[Tuple[Dict, List
         entry_html = f"<h2>Tracking update for {prettify('entry', entry)}</h2>\n"
         for (item, status) in email_entry_items:
             # html
+            fmt_status = format_status(status)
             if "site" not in entry or entry["site"] == SITE_MERCARI:
-                entry_html += f"""<p>[{status}]<a href="{item.productURL}">{item.productName}</a> ({prettify('price', item.price)}, {prettify('status', item.status)})</p>
+                entry_html += f"""<p>[{fmt_status}]<a href="{item.productURL}">{item.productName}</a> ({prettify('price', item.price)}, {prettify('status', item.status)})</p>
                 <p><img src="cid:{item.id}"></p>\n"""
             elif entry["site"] == SITE_YAHOO_AUCTIONS:
-                entry_html += f"""<p>[{status}]<a href="{item[KEY_URL]}">{item[KEY_TITLE]}</a> ({prettify(KEY_CURRENT_PRICE, item[KEY_CURRENT_PRICE])}, {prettify(KEY_BID_COUNT, item[KEY_BID_COUNT])}, {prettify(KEY_END_TIMESTAMP, item[KEY_END_TIMESTAMP])})</p>
+                entry_html += f"""<p>[{fmt_status}]<a href="{item[KEY_URL]}">{item[KEY_TITLE]}</a> ({prettify(KEY_CURRENT_PRICE, item[KEY_CURRENT_PRICE])}, {prettify(KEY_BID_COUNT, item[KEY_BID_COUNT])}, {prettify(KEY_END_TIMESTAMP, item[KEY_END_TIMESTAMP])})</p>
                 <p><img src="cid:{item[KEY_ITEM_ID]}"></p>\n"""
 
             # image

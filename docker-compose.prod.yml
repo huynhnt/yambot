@@ -1,0 +1,14 @@
+services:
+  yambot-api:
+    image: tienhuynh/yambot-api:latest
+    container_name: yambot-api
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
+
+networks:
+  default:
+    external: true
+    name: shared-network

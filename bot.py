@@ -292,7 +292,7 @@ def track(entry_id=ALL_ENTRIES, send_email=True):
             new_track_json.append(entry)
             continue
         # 2.2. compare with last result
-        last_search_result_dict = entry["last_result"]
+        last_search_result_dict = entry.get("last_result", {})
         search_result_dict = {}
 
         # site-specific actions
@@ -304,20 +304,19 @@ def track(entry_id=ALL_ENTRIES, send_email=True):
                 search_result_dict[item.id] = {"price": item.price, "status": item.status}
                 # 2.3. if anything new:
                 if item.id not in last_search_result_dict: # New
-                    email_entry_items.append((item, TRACK_STATUS_NEW))
+                    email_entry_items.append((item, {"type": "new"}))
                 elif search_result_dict[item.id] != last_search_result_dict[item.id]: # Modified
                     # Ignore if price changes after sold out
                     if search_result_dict[item.id]["status"] == MercariItemStatus.ITEM_STATUS_SOLD_OUT and last_search_result_dict[item.id]["status"] == MercariItemStatus.ITEM_STATUS_SOLD_OUT and search_result_dict[item.id]["price"] != last_search_result_dict[item.id]["price"]:
                         continue
                     
-                    modification = []
+                    modification = {}
                     for key in search_result_dict[item.id]:
                         if key not in last_search_result_dict[item.id]:
-                            modification.append("None" + "->" + prettify(key, search_result_dict[item.id][key]))
+                            modification[key] = {"old": None, "new": search_result_dict[item.id][key]}
                         elif search_result_dict[item.id][key] != last_search_result_dict[item.id][key]:
-                            modification.append(prettify(key, last_search_result_dict[item.id][key]) + "->" + prettify(key, search_result_dict[item.id][key]))
-                        # print(key, modification)
-                    email_entry_items.append((item, TRACK_STATUS_MODIFIED + "(" + ", ".join(modification) + ")"))
+                            modification[key] = {"old": last_search_result_dict[item.id][key], "new": search_result_dict[item.id][key]}
+                    email_entry_items.append((item, {"type": "modified", "changes": modification}))
         elif entry["site"] == SITE_YAHOO_AUCTIONS:
             for item in search_result:
                 if "exclude_items" in entry and item[KEY_ITEM_ID] in entry["exclude_items"]:
@@ -332,19 +331,19 @@ def track(entry_id=ALL_ENTRIES, send_email=True):
                     search_result_dict[item[KEY_ITEM_ID]]["time_left"] = prettify(KEY_END_TIMESTAMP, item[KEY_END_TIMESTAMP])
 
                 if item[KEY_ITEM_ID] not in last_search_result_dict: # New
-                    email_entry_items.append((item, TRACK_STATUS_NEW))
+                    email_entry_items.append((item, {"type": "new"}))
                 else: # Check for Modification
-                    modification = []
+                    modification = {}
                     for key in search_result_dict[item[KEY_ITEM_ID]]:
                         if key in ["start_time", "time_left"]:
                             continue
                         if key not in last_search_result_dict[item[KEY_ITEM_ID]]:
-                            modification.append("None" + "->" + prettify(key, search_result_dict[item[KEY_ITEM_ID]][key]))
+                            modification[key] = {"old": None, "new": search_result_dict[item[KEY_ITEM_ID]][key]}
                         elif search_result_dict[item[KEY_ITEM_ID]][key] != last_search_result_dict[item[KEY_ITEM_ID]][key]:
-                            modification.append(prettify(key, last_search_result_dict[item[KEY_ITEM_ID]][key]) + "->" + prettify(key, search_result_dict[item[KEY_ITEM_ID]][key]))
+                            modification[key] = {"old": last_search_result_dict[item[KEY_ITEM_ID]][key], "new": search_result_dict[item[KEY_ITEM_ID]][key]}
                     
                     if modification:
-                        email_entry_items.append((item, TRACK_STATUS_MODIFIED + "(" + ", ".join(modification) + ")"))
+                        email_entry_items.append((item, {"type": "modified", "changes": modification}))
         else:
             raise ValueError("unknown site")
 
