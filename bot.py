@@ -1,0 +1,503 @@
+import os
+import sys
+
+bot_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(bot_dir)
+sys.path.append("Yoku")
+
+import argparse
+import logging
+from typing import Tuple, List, Dict
+from datetime import datetime
+
+from mercari.mercari.mercari import MercariSort, MercariOrder, MercariSearchStatus, MercariItemStatus
+from mercari.mercari.mercari import search as search_mercari
+
+from Yoku.yoku.consts import KEY_TITLE, KEY_IMAGE, KEY_URL, KEY_POST_TIMESTAMP, KEY_END_TIMESTAMP, KEY_START_TIMESTAMP, KEY_ITEM_ID, KEY_BUYNOW_PRICE, KEY_CURRENT_PRICE, KEY_START_PRICE, KEY_BID_COUNT
+from Yoku.yoku.scrape import search as search_yahoo_auctions, prettify_timestamp
+
+from email_utils import EmailConfig, send_tracking_email, prettify
+from json_utils import load_file_to_json, save_json_to_file
+from config import *
+
+mercari_level_help = """
+Yambot's Ambiguity Levels for Mercari
+- Level 1 (Absolutely Unique): track all items
+- Level 2 (Unique): track items with full keyword in their title
+- Level 3 (Ambiguous): search with supplemental keywords, track items with full keyword in their title
+"""
+
+mercari_category_help = f"""
+Category of Mercari Items (category_id)
+Set the カテゴリー and the number after category_id= in the URL.
+CD: {MERCARI_CATEGORY_CD}
+List of integers, seperated with comma. Example: 694,695
+"""
+
+yahoo_auctions_category_help = f"""
+Category of Yahoo! Auctions Items (auccat)
+Set the カテゴリ and the number after auccat= in the URL.
+Music: {YAHOO_CATEGORY_MUSIC}
+CD: {YAHOO_CATEGORY_CD}
+One integer.
+"""
+
+mercari_condition_help = """
+Conditions of Mercari Items (item_condition_id)
+- 1: 新品、未使用
+- 2: 未使用に近い
+- 3: 目立った傷や汚れなし
+- 4: やや傷や汚れあり
+- 5: 傷や汚れあり
+- 6: 全体的に状態が悪い
+List of integers, seperated with comma. Example: 3,4,6
+"""
+
+yahoo_auctions_condition_help = """
+Conditions of Yahoo! Auctions Items (istatus)
+- 1: 未使用
+- 2: 中古
+- 3: 未使用に近い
+- 4: 目立った傷や汚れなし
+- 5: やや傷や汚れあり
+- 6: 傷や汚れあり
+- 7: 全体的に状態が悪い
+List of integers, seperated with comma. Example: 3,4,6
+Note: 2 is equivalent to 3,4,5,6,7
+"""
+
+def update(entry: dict) -> Tuple[bool, List]:
+    if "site" not in entry or entry["site"] == SITE_MERCARI: # for backwards compatibility
+        if entry["level"] == LEVEL_ABSOLUTELY_UNIQUE or entry["level"] == LEVEL_UNIQUE:
+            search_keyword = entry["keyword"]
+        elif entry["level"] == LEVEL_AMBIGUOUS:
+            search_keyword = entry["keyword"] + " " + entry["supplement"]
+        else:
+            raise ValueError("unknown level")
+
+        # optional parameters
+        # TODO: Use blacklist instead of whitelist
+        exclude_keyword = ""
+        if "exclude_keyword" in entry:
+            exclude_keyword = entry["exclude_keyword"]
+        category_id = []
+        if "category_id" in entry:
+            if isinstance(entry["category_id"], int): # backwards compatibility, used to use int
+                if entry["category_id"] != 0: # [0] works somehow but better check
+                    category_id = [entry["category_id"]]
+            else:
+                category_id = entry["category_id"]
+        price_max = 0
+        if "price_max" in entry:
+            price_max = entry["price_max"]
+        price_min = 0
+        if "price_min" in entry:
+            price_min = entry["price_min"]
+        item_condition_id = []
+        if "item_condition_id" in entry:
+            item_condition_id = entry["item_condition_id"]
+
+        success, search_result = search_mercari(keywords=search_keyword,
+                                                exclude_keywords=exclude_keyword,
+                                                sort=MercariSort.SORT_SCORE,
+                                                order=MercariOrder.ORDER_DESC,
+                                                status=MercariSearchStatus.DEFAULT,
+                                                category_id=category_id,
+                                                price_max=price_max,
+                                                price_min=price_min,
+                                                item_condition_id=item_condition_id,
+                                                request_interval=REQUEST_INTERVAL)
+        
+        if not success:
+            return False, []
+
+        if entry["level"] == LEVEL_ABSOLUTELY_UNIQUE:
+            filtered_search_result = search_result
+        elif entry["level"] == LEVEL_UNIQUE or entry["level"] == LEVEL_AMBIGUOUS:
+            filtered_search_result = []
+            for item in search_result:
+                if entry["keyword"].lower() in item.productName.lower():
+                    filtered_search_result.append(item)
+        
+        return True, filtered_search_result
+    elif entry["site"] == SITE_YAHOO_AUCTIONS:
+
+        not_parameter_keys = ["id", "site", "last_result", "last_time"]
+        parameters = {key: entry[key] for key in entry if key not in not_parameter_keys}
+
+        if "auccat" in parameters and parameters["auccat"] == 0: # backwards compatibility
+            parameters.pop("auccat")
+
+        if ("min" in parameters or "max" in parameters) and "price_type" not in parameters:
+            parameters["price_type"] = "currentprice"
+
+        search_result = search_yahoo_auctions(parameters, request_interval=REQUEST_INTERVAL)
+
+        # assume yahoo auction searches always succeed
+        # TODO: handle connection errors here
+        return True, search_result
+    else:
+        raise ValueError("unknown site")
+
+def add():
+    # 1. read current track.json
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json == None:
+        track_json = []
+
+    max_entry_id = 0
+    for track_entry in track_json:
+        max_entry_id = max(max_entry_id, track_entry["id"])
+    
+    # 2. interactively add keyword
+    new_entry = {}
+
+    # id (unique)
+    new_entry["id"] = max_entry_id + 1
+
+    # site
+    while True:
+        site = input(f"site ('m' for {SITE_MERCARI}, 'y' for {SITE_YAHOO_AUCTIONS}): ")
+        if site == "m":
+            new_entry["site"] = SITE_MERCARI
+            break
+        elif site == "y":
+            new_entry["site"] = SITE_YAHOO_AUCTIONS
+            break
+        else:
+            print("site error")
+            continue
+
+    # search keyword
+    # keyword (mercari) or va (yahoo_auctions)
+    # p for yahoo_auctions is deprecated
+    if new_entry["site"] == SITE_MERCARI:
+        new_entry["keyword"] = input("search keyword: ")
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        new_entry["va"] = input("search keyword: ")
+
+    # ambiguity level (mercari only)
+    if new_entry["site"] == SITE_MERCARI:
+        while True:
+            print(mercari_level_help)
+            level = int(input("keyword's ambiguity level: "))
+            if level == LEVEL_ABSOLUTELY_UNIQUE or level == LEVEL_UNIQUE:
+                new_entry["level"] = level
+                break
+            elif level == LEVEL_AMBIGUOUS:
+                new_entry["level"] = level
+                new_entry["supplement"] = input("supplemental keyword: ")
+                break
+            else:
+                print("level error")
+                continue
+    
+    # excluded keyword, optional
+    # exclude_keyword (mercari) or ve (yahoo_auctions)
+    if new_entry["site"] == SITE_MERCARI:
+        input_str = input("excluded keyword, press enter to skip: ")
+        if input_str != "":
+            new_entry["exclude_keyword"] = input_str
+    if new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        input_str = input("excluded keyword, press enter to skip: ")
+        if input_str != "":
+            new_entry["ve"] = input_str
+
+    # category, optional
+    # category_id (mercari) or auccat (yahoo_auctions)
+    if new_entry["site"] == SITE_MERCARI:
+        print(mercari_category_help)
+        input_str = input(f"category of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["category_id"] = list(map(int, input_str.split(',')))
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        print(yahoo_auctions_category_help)
+        input_str = input(f"category of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["auccat"] = int(input_str)
+
+    # condition (new or used, etc.), optional
+    # item_condition_id (mercari) or istatus (yahoo_auctions)
+    if new_entry["site"] == SITE_MERCARI:
+        print(mercari_condition_help)
+        input_str = input("condition of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["item_condition_id"] = list(map(int, input_str.split(',')))
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        print(yahoo_auctions_condition_help)
+        input_str = input("condition of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["istatus"] = list(map(int, input_str.split(',')))
+
+    # maximum price, optional
+    # price_max (mercari) or max (yahoo_auctions)
+    # aucmaxprice for yahoo_auctions is deprecated
+    if new_entry["site"] == SITE_MERCARI:
+        input_str = input("maximum price of items (in [300, 9999999]), press enter to skip: ")
+        if input_str != "":
+            new_entry["price_max"] = int(input_str)
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        input_str = input("maximum price of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["max"] = int(input_str)
+
+    # minimum price, optional
+    # price_min (mercari) or min (yahoo_auctions)
+    if new_entry["site"] == SITE_MERCARI:
+        input_str = input("minimum price of items (in [300, 9999999]), press enter to skip: ")
+        if input_str != "":
+            new_entry["price_min"] = int(input_str)
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        input_str = input("minimum price of items, press enter to skip: ")
+        if input_str != "":
+            new_entry["min"] = int(input_str)
+    
+    # 3. initial update
+    success, search_result = update(new_entry)
+    if not success:
+        print("initial update failed, abort")
+        return
+    search_result_dict = {}
+    if new_entry["site"] == SITE_MERCARI:
+        for item in search_result:
+            search_result_dict[item.id] = {"price": item.price, "status": item.status}
+    elif new_entry["site"] == SITE_YAHOO_AUCTIONS:
+        for item in search_result:
+            search_result_dict[item[KEY_ITEM_ID]] = {KEY_CURRENT_PRICE: item[KEY_CURRENT_PRICE], KEY_BID_COUNT: item[KEY_BID_COUNT]}
+    new_entry["last_result"] = search_result_dict
+    new_entry["last_time"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    # 4. write back to track.json
+    track_json.append(new_entry)
+    save_json_to_file(track_json, RESULT_PATH)
+    return
+
+def track(entry_id=ALL_ENTRIES, send_email=True):
+    email_items = [] # list of tuple(entry, list of tuple(Item, status))
+    # 1. read current track.json
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json == None:
+        track_json = []
+    new_track_json = []
+    # 2. for each entry:
+    for entry in track_json:
+        if entry_id != ALL_ENTRIES and entry["id"] != entry_id:
+            new_track_json.append(entry)
+            continue
+        email_entry_items = []
+        # 2.1. update search result
+        success, search_result = update(entry)
+        if not success:
+            logging.error(f"Update of {entry} failed, skipping")
+            new_track_json.append(entry)
+            continue
+        # 2.2. compare with last result
+        last_search_result_dict = entry["last_result"]
+        search_result_dict = {}
+
+        # site-specific actions
+        if "site" not in entry or entry["site"] == SITE_MERCARI: # for backwards compatibility
+            entry["site"] = SITE_MERCARI
+            for item in search_result:
+                if "exclude_items" in entry and item.id in entry["exclude_items"]:
+                    continue
+                search_result_dict[item.id] = {"price": item.price, "status": item.status}
+                # 2.3. if anything new:
+                if item.id not in last_search_result_dict: # New
+                    email_entry_items.append((item, TRACK_STATUS_NEW))
+                elif search_result_dict[item.id] != last_search_result_dict[item.id]: # Modified
+                    # Ignore if price changes after sold out
+                    if search_result_dict[item.id]["status"] == MercariItemStatus.ITEM_STATUS_SOLD_OUT and last_search_result_dict[item.id]["status"] == MercariItemStatus.ITEM_STATUS_SOLD_OUT and search_result_dict[item.id]["price"] != last_search_result_dict[item.id]["price"]:
+                        continue
+                    
+                    modification = []
+                    for key in search_result_dict[item.id]:
+                        if key not in last_search_result_dict[item.id]:
+                            modification.append("None" + "->" + prettify(key, search_result_dict[item.id][key]))
+                        elif search_result_dict[item.id][key] != last_search_result_dict[item.id][key]:
+                            modification.append(prettify(key, last_search_result_dict[item.id][key]) + "->" + prettify(key, search_result_dict[item.id][key]))
+                        # print(key, modification)
+                    email_entry_items.append((item, TRACK_STATUS_MODIFIED + "(" + ", ".join(modification) + ")"))
+        elif entry["site"] == SITE_YAHOO_AUCTIONS:
+            for item in search_result:
+                if "exclude_items" in entry and item[KEY_ITEM_ID] in entry["exclude_items"]:
+                    continue
+                search_result_dict[item[KEY_ITEM_ID]] = {
+                    KEY_CURRENT_PRICE: item[KEY_CURRENT_PRICE], 
+                    KEY_BID_COUNT: item[KEY_BID_COUNT]
+                }
+                if KEY_START_TIMESTAMP in item:
+                    search_result_dict[item[KEY_ITEM_ID]]["start_time"] = prettify_timestamp(item[KEY_START_TIMESTAMP])
+                if KEY_END_TIMESTAMP in item:
+                    search_result_dict[item[KEY_ITEM_ID]]["time_left"] = prettify(KEY_END_TIMESTAMP, item[KEY_END_TIMESTAMP])
+
+                if item[KEY_ITEM_ID] not in last_search_result_dict: # New
+                    email_entry_items.append((item, TRACK_STATUS_NEW))
+                else: # Check for Modification
+                    modification = []
+                    for key in search_result_dict[item[KEY_ITEM_ID]]:
+                        if key in ["start_time", "time_left"]:
+                            continue
+                        if key not in last_search_result_dict[item[KEY_ITEM_ID]]:
+                            modification.append("None" + "->" + prettify(key, search_result_dict[item[KEY_ITEM_ID]][key]))
+                        elif search_result_dict[item[KEY_ITEM_ID]][key] != last_search_result_dict[item[KEY_ITEM_ID]][key]:
+                            modification.append(prettify(key, last_search_result_dict[item[KEY_ITEM_ID]][key]) + "->" + prettify(key, search_result_dict[item[KEY_ITEM_ID]][key]))
+                    
+                    if modification:
+                        email_entry_items.append((item, TRACK_STATUS_MODIFIED + "(" + ", ".join(modification) + ")"))
+        else:
+            raise ValueError("unknown site")
+
+        entry["last_result"] = search_result_dict
+        entry["last_time"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        new_track_json.append(entry)
+        if len(email_entry_items) > 0:
+            email_items.append((entry, email_entry_items))
+    # 2.4. send email
+    if len(email_items) > 0:
+        if send_email:
+            send_tracking_email(EmailConfig(email_config_path=EMAIL_CONFIG_PATH), email_items)
+    else:
+        print("nothing new")
+    
+    # 3. write back to track.json
+    save_json_to_file(new_track_json, RESULT_PATH)
+    return email_items
+
+def list_(entry_id=ALL_ENTRIES):
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json == None:
+        track_json = []
+    for entry in track_json:
+        if entry_id != ALL_ENTRIES and entry["id"] != entry_id:
+            continue
+        print(prettify("entry", entry))
+
+def get_keyword(entry: Dict):
+    if "site" not in entry or entry["site"] == SITE_MERCARI:
+        if entry["level"] == LEVEL_ABSOLUTELY_UNIQUE or entry["level"] == LEVEL_UNIQUE:
+            return entry["keyword"]
+        elif entry["level"] == LEVEL_AMBIGUOUS:
+            return f"{entry['keyword']} {entry['supplement']}"
+    elif entry["site"] == SITE_YAHOO_AUCTIONS:
+            if "p" in entry:
+                return entry["p"]
+            else:
+                return entry["va"]
+    else:
+        raise ValueError("unknown site")
+
+def sort_():
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json == None:
+        track_json = []
+    # for entry in track_json:
+    #     print(prettify("entry", entry))
+    track_json.sort(key=lambda e: get_keyword(e))
+    for i, e in enumerate(track_json, start=1):
+        e["id"] = i
+    for entry in track_json:
+        print(prettify("entry", entry))
+    save_json_to_file(track_json, RESULT_PATH)
+    # list_()
+
+def exclude(entry_id, exclude_keyword):
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json is None:
+        track_json = []
+
+    entry_found = False
+    for entry in track_json:
+        if entry["id"] == entry_id:
+            entry_found = True
+            if entry["site"] == SITE_MERCARI:
+                if "exclude_keyword" in entry:
+                    entry["exclude_keyword"] += f" {exclude_keyword}"
+                else:
+                    entry["exclude_keyword"] = exclude_keyword
+            elif entry["site"] == SITE_YAHOO_AUCTIONS:
+                if "p" in entry:
+                    entry["va"] = entry["p"]
+                    del entry["p"]
+
+                if "ve" in entry:
+                    entry["ve"] += f" {exclude_keyword}"
+                else:
+                    entry["ve"] = exclude_keyword
+            else:
+                raise ValueError("unknown site")
+            break
+
+    if entry_found:
+        save_json_to_file(track_json, RESULT_PATH)
+        list_(entry_id)
+    else:
+        print(f"Entry {entry_id} not found")
+
+def exclude_item(entry_id, item_id):
+    track_json = load_file_to_json(file_path=RESULT_PATH)
+    if track_json is None:
+        track_json = []
+
+    entry_found = False
+    for entry in track_json:
+        if entry["id"] == entry_id:
+            entry_found = True
+            if "exclude_items" not in entry:
+                entry["exclude_items"] = []
+            if item_id not in entry["exclude_items"]:
+                entry["exclude_items"].append(item_id)
+            break
+
+    if entry_found:
+        save_json_to_file(track_json, RESULT_PATH)
+        print(f"Added item {item_id} to exclude list for entry {entry_id}")
+    else:
+        print(f"Entry {entry_id} not found")
+
+if __name__ == "__main__":
+    logging.basicConfig(filename="error.log", level=logging.ERROR, format='%(asctime)s %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    parser = argparse.ArgumentParser(description="Yambot")
+    subparsers = parser.add_subparsers(dest='action')
+
+    add_parser = subparsers.add_parser('add')
+
+    list_parser = subparsers.add_parser('list')
+    list_parser.add_argument('--id', type=int, help='Specific entry id to list', default=None)
+
+    track_parser = subparsers.add_parser('track')
+    track_parser.add_argument('--id', type=int, help='Specific entry id to track', default=None)
+
+    sort_parser = subparsers.add_parser('sort')
+
+    exclude_parser = subparsers.add_parser('exclude')
+    exclude_parser.add_argument('--id', type=int, required=True, help='Specific entry id to exclude keyword from')
+    exclude_parser.add_argument('--keyword', type=str, required=True, help='Keyword to exclude')
+
+    exclude_item_parser = subparsers.add_parser('exclude_item')
+    exclude_item_parser.add_argument('--id', type=int, required=True, help='Specific entry id to exclude item from')
+    exclude_item_parser.add_argument('--item_id', type=str, required=True, help='Item ID to exclude')
+
+    args = parser.parse_args()
+    try:
+        if args.action == 'add':
+            add()
+        elif args.action == "list":
+            if args.id:
+                list_(entry_id=args.id)
+            else:
+                list_()
+        elif args.action == "sort":
+            sort_()
+        elif args.action == 'track':
+            if args.id:
+                track(entry_id=args.id)
+            else:
+                track()
+        elif args.action == 'exclude':
+            exclude(args.id, args.keyword)
+        elif args.action == 'exclude_item':
+            exclude_item(args.id, args.item_id)
+    except Exception as e:
+        logging.error(f"An error occurred:\n{e}", exc_info=True)
