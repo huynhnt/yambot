@@ -76,7 +76,9 @@ def trigger_tracking():
             
             entry_res["changes"].append({
                 "status": status,
-                "item": item_data
+                "item": item_data,
+                "site": entry.get("site", "UNKNOWN"),
+                "keyword": entry.get("keyword") or entry.get("va") or "UNKNOWN"
             })
             
         response_data.append(entry_res)
