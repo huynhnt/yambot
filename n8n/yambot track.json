@@ -51,21 +51,7 @@
     },
     {
       "parameters": {
-        "fieldToSplitOut": "changes",
-        "options": {}
-      },
-      "id": "4605e8eb-b631-47e1-826a-a96d22111c6a",
-      "name": "Split by Item",
-      "type": "n8n-nodes-base.itemLists",
-      "typeVersion": 3,
-      "position": [
-        672,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  const site = data.site || 'UNKNOWN';\n  const keyword = data.keyword || 'UNKNOWN';\n  const status = data.status;\n  const product = data.item;\n\n  let msg = `[${site.toUpperCase()}] Từ khoá: <b>${keyword}</b>\\n`;\n  const title = product.productName || product.title || 'No Title';\n  const url = product.productURL || product.url || '';\n  \n  if (status.type === 'new') {\n    msg += `🆕 <b>Sản phẩm mới!</b>\\n`;\n    msg += `Tên: <a href=\"${url}\">${title}</a>\\n`;\n    msg += `Giá: ${product.price || product.curr_price}\\n`;\n  } else if (status.type === 'modified') {\n    msg += `⚠️ <b>Cập nhật sản phẩm!</b>\\n`;\n    msg += `Tên: <a href=\"${url}\">${title}</a>\\n`;\n    if (status.changes && status.changes.price) {\n      msg += `💰 Giá: <s>${status.changes.price.old}</s> ➡️ ${status.changes.price.new}\\n`;\n    }\n    if (status.changes && status.changes.status) {\n      msg += `Trạng thái: <s>${status.changes.status.old}</s> ➡️ ${status.changes.status.new}\\n`;\n    }\n  } else if (status.type === 'ending_soon') {\n    msg += `⏰ <b>Sắp kết thúc phiên! (Còn 30p - 1h)</b>\\n`;\n    msg += `Tên: <a href=\"${url}\">${title}</a>\\n`;\n    msg += `Giá: ${product.price || product.curr_price}\\n`;\n  }\n\n  if (status.ending_soon) {\n    msg += `⏰ <b>Sắp kết thúc phiên! (Còn 30p - 1h)</b>\\n`;\n  }\n\n  const itemId = product.id_ || product.item_id || product.id || url.split('/').pop();\n  if (itemId) {\n    msg += `\\n🚫 Bỏ qua SP này: /exclude_${itemId}\\n`;\n  }\n\n  results.push({ json: { telegram_text: msg } });\n}\n\nreturn results;"
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  const site = data.site || 'UNKNOWN';\n  const keyword = data.keyword || 'UNKNOWN';\n  const changes = data.changes || [];\n  \n  if (changes.length === 0) continue;\n  \n  let msg = `<b>Tracking update for \"${keyword}\" (${site.toUpperCase()})</b>\\n\\n`;\n  \n  for (const change of changes) {\n    const status = change.status;\n    const product = change.item;\n    \n    const title = product.productName || product.title || 'No Title';\n    const url = product.productURL || product.url || '';\n    const price = product.price || product.curr_price || 'N/A';\n    const image = product.imageURL || product.image_url || product.img_url || product.image || product.thumbnail || (product.thumbnails && product.thumbnails[0]) || '';\n    \n    let extra = [];\n    extra.push(`¥${price}`);\n    if (product.bids !== undefined) extra.push(`${product.bids} bids`);\n    \n    let extraStr = extra.length > 0 ? ` (${extra.join(', ')})` : '';\n    \n    let statusText = '';\n    if (status.type === 'new') {\n      statusText = '🆕 [New!!]';\n    } else if (status.type === 'modified') {\n      statusText = '⚠️ [Update!]';\n    } else if (status.type === 'ending_soon') {\n      statusText = '⏰ [Ending Soon!]';\n    }\n    \n    if (status.ending_soon) {\n      statusText = '⏰ [Ending Soon!] ' + statusText;\n    }\n    \n    msg += `${statusText} <a href=\"${url}\">${title}</a>${extraStr}\\n`;\n    \n    if (status.type === 'modified') {\n      if (status.changes && status.changes.price) {\n        msg += `   💰 Giá: <s>${status.changes.price.old}</s> ➡️ ${status.changes.price.new}\\n`;\n      }\n      if (status.changes && status.changes.status) {\n        msg += `   Trạng thái: <s>${status.changes.status.old}</s> ➡️ ${status.changes.status.new}\\n`;\n      }\n    }\n    \n    const itemId = product.id_ || product.item_id || product.id || url.split('/').pop();\n    if (itemId) {\n      msg += `   🚫 Bỏ qua: /exclude_${itemId}\\n`;\n    }\n    \n    if (image) {\n      msg += `<a href=\"${image}\">&#8205;</a>\\n`;\n    }\n    msg += `\\n`;\n  }\n\n  results.push({ json: { telegram_text: msg.trim() } });\n}\n\nreturn results;"
       },
       "id": "07fb6bb3-0014-43a2-9de5-e5e7d6b3ac73",
       "name": "Format Message",
@@ -126,17 +112,6 @@
       ]
     },
     "Split by Keyword": {
-      "main": [
-        [
-          {
-            "node": "Split by Item",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Split by Item": {
       "main": [
         [
           {
