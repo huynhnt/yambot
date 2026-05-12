@@ -4,8 +4,12 @@ services:
     container_name: yambot-api
     ports:
       - "8080:8080"
+    volumes:
+      - ./track.json:/app/track.json
     environment:
       - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
     restart: always
 
 networks:
