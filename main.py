@@ -20,6 +20,10 @@ class TrackItem(BaseModel):
     min_price: Optional[int] = None
     max_price: Optional[int] = None
     exclude_keyword: Optional[str] = None
+    category_id: Optional[List[int]] = None
+    item_condition_id: Optional[List[int]] = None
+    level: Optional[int] = None
+    supplement: Optional[str] = None
 
 class ExcludeRequest(BaseModel):
     item_id: str
@@ -98,15 +102,20 @@ def add_config(item: TrackItem):
     
     if item.site == bot.SITE_MERCARI:
         new_entry["keyword"] = item.keyword
-        new_entry["level"] = bot.LEVEL_ABSOLUTELY_UNIQUE # Mặc định lấy chính xác
+        new_entry["level"] = item.level if item.level else bot.LEVEL_ABSOLUTELY_UNIQUE
+        if item.supplement: new_entry["supplement"] = item.supplement
         if item.min_price: new_entry["price_min"] = item.min_price
         if item.max_price: new_entry["price_max"] = item.max_price
         if item.exclude_keyword: new_entry["exclude_keyword"] = item.exclude_keyword
+        if item.category_id: new_entry["category_id"] = item.category_id
+        if item.item_condition_id: new_entry["item_condition_id"] = item.item_condition_id
     elif item.site == bot.SITE_YAHOO_AUCTIONS:
         new_entry["va"] = item.keyword
         if item.min_price: new_entry["min"] = item.min_price
         if item.max_price: new_entry["max"] = item.max_price
         if item.exclude_keyword: new_entry["ve"] = item.exclude_keyword
+        if item.category_id and len(item.category_id) > 0: new_entry["auccat"] = item.category_id[0]
+        if item.item_condition_id: new_entry["istatus"] = item.item_condition_id
     else:
         raise HTTPException(status_code=400, detail="Site must be 'mercari' or 'yahoo_auctions'")
         

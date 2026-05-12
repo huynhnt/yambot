@@ -1,0 +1,174 @@
+{
+  "name": "Yambot track",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "41e57bb6-16a1-4198-9f0e-b9eb8c2f4516",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://yambot-api:8080/track",
+        "options": {}
+      },
+      "id": "8007e2d4-f7b2-4166-9b51-0a845fc6ac91",
+      "name": "Call Yambot API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "new_or_modified_items",
+        "options": {}
+      },
+      "id": "0b5c4f44-19bb-4203-a160-9883f2c6fc6e",
+      "name": "Split by Keyword",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "changes",
+        "options": {}
+      },
+      "id": "4605e8eb-b631-47e1-826a-a96d22111c6a",
+      "name": "Split by Item",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  const site = data.site || 'UNKNOWN';\n  const keyword = data.keyword || 'UNKNOWN';\n  const status = data.status;\n  const product = data.item;\n\n  let msg = `[${site.toUpperCase()}] Từ khoá: <b>${keyword}</b>\\n`;\n  const title = product.productName || product.title || 'No Title';\n  const url = product.productURL || product.url || '';\n  \n  if (status.type === 'new') {\n    msg += `🆕 <b>Sản phẩm mới!</b>\\n`;\n    msg += `Tên: <a href=\"${url}\">${title}</a>\\n`;\n    msg += `Giá: ${product.price || product.curr_price}\\n`;\n  } else if (status.type === 'modified') {\n    msg += `⚠️ <b>Cập nhật sản phẩm!</b>\\n`;\n    msg += `Tên: <a href=\"${url}\">${title}</a>\\n`;\n    if (status.changes && status.changes.price) {\n      msg += `💰 Giá: <s>${status.changes.price.old}</s> ➡️ ${status.changes.price.new}\\n`;\n    }\n    if (status.changes && status.changes.status) {\n      msg += `Trạng thái: <s>${status.changes.status.old}</s> ➡️ ${status.changes.status.new}\\n`;\n    }\n  }\n\n  results.push({ json: { telegram_text: msg } });\n}\n\nreturn results;"
+      },
+      "id": "07fb6bb3-0014-43a2-9de5-e5e7d6b3ac73",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "7640423074",
+        "text": "={{ $json.telegram_text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "91034e6d-f788-42fe-942a-fb9fb0b38f94",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1104,
+        0
+      ],
+      "webhookId": "39c23544-2d8b-4754-8b51-2b87851e0ea5",
+      "credentials": {
+        "telegramApi": {
+          "id": "vgmgGUNtUgPwmASp",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Call Yambot API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Yambot API": {
+      "main": [
+        [
+          {
+            "node": "Split by Keyword",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split by Keyword": {
+      "main": [
+        [
+          {
+            "node": "Split by Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split by Item": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e927b33a-32aa-4850-aed9-2b175587600e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3cc6c4256e2bbdec1b3708c49dc3889c7266357f3e239651c157c2de760e6c65"
+  },
+  "id": "ti4e65RurEWoSlTq",
+  "tags": []
+}

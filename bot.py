@@ -44,26 +44,26 @@ One integer.
 
 mercari_condition_help = """
 Conditions of Mercari Items (item_condition_id)
-- 1: 新品、未使用
-- 2: 未使用に近い
-- 3: 目立った傷や汚れなし
-- 4: やや傷や汚れあり
-- 5: 傷や汚れあり
-- 6: 全体的に状態が悪い
+- 1: 新品、未使用 (Hàng mới tinh, chưa qua sử dụng)
+- 2: 未使用に近い (Hàng gần như mới, rất ít khi dùng)
+- 3: 目立った傷や汚れなし (Hàng không có vết xước hoặc vết bẩn nào rõ ràng)
+- 4: やや傷や汚れあり (Hàng có một chút xước hoặc bẩn nhẹ)
+- 5: 傷や汚れあり (Hàng có vết xước hoặc bẩn rõ rệt)
+- 6: 全体的に状態が悪い (Tình trạng tổng thể rất tệ/hàng cũ nát)    
 List of integers, seperated with comma. Example: 3,4,6
 """
 
 yahoo_auctions_condition_help = """
 Conditions of Yahoo! Auctions Items (istatus)
-- 1: 未使用
-- 2: 中古
-- 3: 未使用に近い
-- 4: 目立った傷や汚れなし
-- 5: やや傷や汚れあり
-- 6: 傷や汚れあり
-- 7: 全体的に状態が悪い
-List of integers, seperated with comma. Example: 3,4,6
+- 1: 未使用 (Hàng chưa qua sử dụng)
+- 2: 中古 (Hàng cũ/đã qua sử dụng nói chung)
+- 3: 未使用に近い (Gần như mới, rất ít khi dùng)
+- 4: 目立った傷や汚れなし (Không có vết xước hoặc vết bẩn nào rõ ràng)
+- 5: やや傷や汚れあり (Có một chút xước hoặc bẩn nhẹ)
+- 6: 傷や汚れあり (Có vết xước hoặc bẩn rõ rệt)
+- 7: 全体的に状態が悪い (Tình trạng tổng thể rất tệ)
 Note: 2 is equivalent to 3,4,5,6,7
+List of integers, seperated with comma. Example: 3,4,6
 """
 
 def update(entry: dict) -> Tuple[bool, List]:
@@ -325,18 +325,11 @@ def track(entry_id=ALL_ENTRIES, send_email=True):
                     KEY_CURRENT_PRICE: item[KEY_CURRENT_PRICE], 
                     KEY_BID_COUNT: item[KEY_BID_COUNT]
                 }
-                if KEY_START_TIMESTAMP in item:
-                    search_result_dict[item[KEY_ITEM_ID]]["start_time"] = prettify_timestamp(item[KEY_START_TIMESTAMP])
-                if KEY_END_TIMESTAMP in item:
-                    search_result_dict[item[KEY_ITEM_ID]]["time_left"] = prettify(KEY_END_TIMESTAMP, item[KEY_END_TIMESTAMP])
-
                 if item[KEY_ITEM_ID] not in last_search_result_dict: # New
                     email_entry_items.append((item, {"type": "new"}))
                 else: # Check for Modification
                     modification = {}
                     for key in search_result_dict[item[KEY_ITEM_ID]]:
-                        if key in ["start_time", "time_left"]:
-                            continue
                         if key not in last_search_result_dict[item[KEY_ITEM_ID]]:
                             modification[key] = {"old": None, "new": search_result_dict[item[KEY_ITEM_ID]][key]}
                         elif search_result_dict[item[KEY_ITEM_ID]][key] != last_search_result_dict[item[KEY_ITEM_ID]][key]:

@@ -1,0 +1,568 @@
+{
+  "name": "Yambot command",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "8f888683-ce32-4095-8471-8a08b9bc59c7",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -496,
+        400
+      ],
+      "webhookId": "487f8d77-bc3b-44fa-a52f-57984cab71a8",
+      "credentials": {
+        "telegramApi": {
+          "id": "vgmgGUNtUgPwmASp",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.message.text }}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "startsWith",
+              "value2": "/start"
+            },
+            {
+              "operation": "startsWith",
+              "value2": "/help"
+            },
+            {
+              "operation": "startsWith",
+              "value2": "/list",
+              "output": 1
+            },
+            {
+              "operation": "startsWith",
+              "value2": "/add",
+              "output": 2
+            },
+            {
+              "operation": "startsWith",
+              "value2": "/remove",
+              "output": 3
+            },
+            {
+              "operation": "startsWith",
+              "value2": "/exclude",
+              "output": 4
+            }
+          ]
+        }
+      },
+      "id": "251ddf26-2ce8-4129-9b18-540d3be3d271",
+      "name": "Command Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chat_id = $input.first().json.message.chat.id;\nconst msg = `👋 <b>Chào mừng bạn đến với Yambot!</b>\\n\\n📋 <b>Danh sách lệnh:</b>\\n/list - Xem danh sách đang theo dõi\\n/add - Thêm từ khoá mới\\n/help - Xem lại tin nhắn này\\n\\n💡 <i>Mẹo thêm nâng cao:</i>\\nCú pháp: <code>/add [site] [từ khoá] -min [giá] -max [giá] -ex [từ loại trừ] -cat [mã] -cond [mã] -lv [1-3] -sup [từ phụ]</code>\\nVD: <code>/add mercari iphone 15 -min 1000 -max 50000 -ex hỏng -cat 75 -cond 1,2 -lv 3 -sup apple</code>\\n\\n📝 <b>Hướng dẫn (Mercari):</b>\\n<b>-lv (Level)</b>\\n1: Track tất cả\\n2: Tên sp phải có từ khoá\\n3: (Cần thêm -sup) Tên sp phải có từ khoá\\n\\n<b>-cat (Category)</b>\\nCD: 75\\nBluray: 9888\\n\\n<b>-cond (Condition)</b>\\n1: Mới tinh\\n2: Gần như mới\\n3: Không xước rõ\\n4: Xước nhẹ\\n5: Xước bẩn rõ\\n6: Rất tệ\\n\\n📝 <b>Hướng dẫn (Yahoo Auctions):</b>\\n<b>-cat (Category)</b>\\nMusic: 22152\\nCD: 22192\\n\\n<b>-cond (Condition)</b>\\n1: Mới tinh\\n2: Cũ nói chung\\n3: Gần như mới\\n4: Không xước rõ\\n5: Xước nhẹ\\n6: Xước bẩn rõ\\n7: Rất tệ`;\nreturn { json: { chat_id, text: msg } };\n"
+      },
+      "id": "887ed4af-6440-4fe0-88e0-a1877f1ab56f",
+      "name": "Format Help",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://yambot-api:8080/configs",
+        "options": {}
+      },
+      "id": "0993c905-1627-4762-80ff-57e3ab6002f6",
+      "name": "GET /configs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst chat_id = $('Telegram Trigger').item.json.message.chat.id;\nlet msg = '📋 <b>Danh sách theo dõi:</b>\\n\\n';\n\nif (data.configs && data.configs.length > 0) {\n  data.configs.forEach(c => {\n    const kw = c.keyword || c.va || 'N/A';\n    msg += `🔸 <b>[${c.site.toUpperCase()}]</b> ${kw}\\n`;\n    msg += `👉 Nhấn để xoá: /remove_${c.id}\\n\\n`;\n  });\n} else {\n  msg += 'Chưa có cấu hình nào. Hãy dùng lệnh /add để thêm mới.';\n}\nreturn { json: { chat_id, text: msg } };"
+      },
+      "id": "a3dddd93-cf9e-4126-ab44-d475d2be3f98",
+      "name": "Format List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.message.text;\nconst chat_id = $input.first().json.message.chat.id;\nconst parts = text.split(' ');\n\nif (parts.length < 3) {\n  return { json: { error: true, chat_id, text: \"⚠️ <b>Sai cú pháp!</b>\\nHD: <code>/add [site] [từ khoá] -min [giá] -max [giá] -ex [từ loại trừ] -cat [mã,mã] -cond [mã,mã] -lv [1/2/3] -sup [từ phụ]</code>\\n👉 Dùng lệnh /help để xem hướng dẫn chi tiết các mã danh mục và tình trạng.\" } };\n}\n\nlet site = parts[1].toLowerCase();\nif (site === 'yahoo') site = 'yahoo_auctions';\n\nlet restText = parts.slice(2).join(' ');\nlet keyword = restText;\nlet min_price = null, max_price = null, exclude_keyword = null;\nlet category_id = null, item_condition_id = null, level = 1, supplement = null;\n\nconst minMatch = restText.match(/-min\\s+(\\d+)/);\nif (minMatch) {\n    min_price = parseInt(minMatch[1], 10);\n    keyword = keyword.replace(minMatch[0], '');\n}\n\nconst maxMatch = restText.match(/-max\\s+(\\d+)/);\nif (maxMatch) {\n    max_price = parseInt(maxMatch[1], 10);\n    keyword = keyword.replace(maxMatch[0], '');\n}\n\nconst catMatch = restText.match(/-cat\\s+([\\d,]+)/);\nif (catMatch) {\n    category_id = catMatch[1].split(',').map(Number);\n    keyword = keyword.replace(catMatch[0], '');\n}\n\nconst condMatch = restText.match(/-cond\\s+([\\d,]+)/);\nif (condMatch) {\n    item_condition_id = condMatch[1].split(',').map(Number);\n    keyword = keyword.replace(condMatch[0], '');\n}\n\nconst lvMatch = restText.match(/-lv\\s+(\\d)/);\nif (lvMatch) {\n    level = parseInt(lvMatch[1], 10);\n    keyword = keyword.replace(lvMatch[0], '');\n}\n\nconst supMatch = restText.match(/-sup\\s+([^-\\n]+)/);\nif (supMatch) {\n    supplement = supMatch[1].trim();\n    keyword = keyword.replace(supMatch[0], '');\n}\n\nconst exMatch = restText.match(/-ex\\s+([^-\\n]+)/);\nif (exMatch) {\n    exclude_keyword = exMatch[1].trim();\n    keyword = keyword.replace(exMatch[0], '');\n}\n\nkeyword = keyword.trim();\n\nreturn { json: { site, keyword, min_price, max_price, exclude_keyword, category_id, item_condition_id, level, supplement, chat_id, error: false } };\n"
+      },
+      "id": "e02875d2-2c89-4b25-8914-0cce131405f7",
+      "name": "Parse Add",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error }}"
+            }
+          ]
+        }
+      },
+      "id": "807a8a16-1040-4f20-a1da-050592f20ebd",
+      "name": "IF Add Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        208,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://yambot-api:8080/configs",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"site\": \"{{ $json.site }}\",\n  \"keyword\": \"{{ $json.keyword }}\",\n  \"min_price\": {{ $json.min_price || \"null\" }},\n  \"max_price\": {{ $json.max_price || \"null\" }},\n  \"exclude_keyword\": {{ $json.exclude_keyword ? `\"${$json.exclude_keyword}\"` : \"null\" }},\n  \"category_id\": {{ $json.category_id ? JSON.stringify($json.category_id) : \"null\" }},\n  \"item_condition_id\": {{ $json.item_condition_id ? JSON.stringify($json.item_condition_id) : \"null\" }},\n  \"level\": {{ $json.level || \"null\" }},\n  \"supplement\": {{ $json.supplement ? `\"${$json.supplement}\"` : \"null\" }}\n}\n",
+        "options": {}
+      },
+      "id": "2905666a-af30-4b98-86b3-b512ff1acd7e",
+      "name": "POST /configs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chat_id = $('Parse Add').item.json.chat_id;\nconst data = $input.first().json;\nconst entry = data.entry;\n\nlet msg = `✅ <b>Đã thêm thành công!</b>\\n`;\nmsg += `ID: ${entry.id}\\nSite: ${entry.site.toUpperCase()}\\nTừ khoá: <b>${entry.keyword || entry.va}</b>\\n`;\n\n// Chỉ hiện thị các dòng này nếu bạn có cấu hình\nif (entry.price_min || entry.min) msg += `🔹 Giá Min: ${entry.price_min || entry.min}\\n`;\nif (entry.price_max || entry.max) msg += `🔹 Giá Max: ${entry.price_max || entry.max}\\n`;\nif (entry.exclude_keyword || entry.ve) msg += `🔹 Loại trừ: ${entry.exclude_keyword || entry.ve}\\n`;\n\nmsg += `\\n👉 Gõ /list để kiểm tra.`;\nreturn { json: { chat_id, text: msg } };\n"
+      },
+      "id": "bbef7677-d2f3-4098-80bc-55bf0d06edfb",
+      "name": "Format Add",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.message.text;\nconst chat_id = $input.first().json.message.chat.id;\nconst match = text.match(/\\/remove_?(\\d+)/);\n\nif (!match) {\n  return { json: { error: true, chat_id, text: \"⚠️ <b>Sai cú pháp!</b>\\nHãy gõ /list và bấm vào nút xoá tương ứng.\" } };\n}\n\nconst id = parseInt(match[1], 10);\nreturn { json: { id, chat_id, error: false } };"
+      },
+      "id": "98e93acc-ae4a-4379-8136-8f18bcb20c62",
+      "name": "Parse Remove",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error }}"
+            }
+          ]
+        }
+      },
+      "id": "d5112d04-db33-4546-b1ff-8690c313eaaa",
+      "name": "IF Remove Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        208,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://yambot-api:8080/configs/{{ $json.id }}",
+        "options": {}
+      },
+      "id": "427c1851-a8c8-4126-a02e-72bbd74039bb",
+      "name": "DELETE /configs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chat_id = $('Parse Remove').item.json.chat_id;\nreturn { json: { chat_id, text: '🗑️ <b>Đã xoá cấu hình thành công!</b>\\nGõ /list để kiểm tra lại.' } };"
+      },
+      "id": "7d2a923e-d888-4cdd-be38-db6d55099a26",
+      "name": "Format Remove",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.message.text;\nconst chat_id = $input.first().json.message.chat.id;\nconst match = text.match(/\\/exclude_?([a-zA-Z0-9_-]+)/);\n\nif (!match) {\n  return { json: { error: true, chat_id, text: \"⚠️ <b>Sai cú pháp!</b>\\nMã sản phẩm không hợp lệ.\" } };\n}\n\nconst item_id = match[1];\nreturn { json: { item_id, chat_id, error: false } };"
+      },
+      "id": "59c1f1e9-4ff4-4231-8f31-b585dc135b3c",
+      "name": "Parse Exclude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error }}"
+            }
+          ]
+        }
+      },
+      "id": "1e8712ae-13b6-42f0-9985-462b81e1e274",
+      "name": "IF Exclude Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        208,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://yambot-api:8080/exclude",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"item_id\": \"{{ $json.item_id }}\"\n}",
+        "options": {}
+      },
+      "id": "29adaac5-e407-4265-958e-3a44d8a3c141",
+      "name": "POST /exclude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chat_id = $('Parse Exclude').item.json.chat_id;\nconst item_id = $('Parse Exclude').item.json.item_id;\nreturn { json: { chat_id, text: `🚫 <b>Đã ẩn sản phẩm!</b>\\nMã: ${item_id} sẽ không hiện trong các lần cào sau.` } };"
+      },
+      "id": "d833ab9c-f3de-4f90-af35-9559c9364cac",
+      "name": "Format Exclude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "51c404cb-ba17-4b4a-b8a7-2341e810ee11",
+      "name": "Reply Telegram1",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        480
+      ],
+      "webhookId": "fed30794-60fb-489e-bf6b-aaabd31627c3",
+      "credentials": {
+        "telegramApi": {
+          "id": "vgmgGUNtUgPwmASp",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Command Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Router": {
+      "main": [
+        [
+          {
+            "node": "Format Help",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GET /configs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Add",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Remove",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Help": {
+      "main": [
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /configs": {
+      "main": [
+        [
+          {
+            "node": "Format List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format List": {
+      "main": [
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Add": {
+      "main": [
+        [
+          {
+            "node": "IF Add Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Add Valid": {
+      "main": [
+        [
+          {
+            "node": "POST /configs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /configs": {
+      "main": [
+        [
+          {
+            "node": "Format Add",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Add": {
+      "main": [
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Remove": {
+      "main": [
+        [
+          {
+            "node": "IF Remove Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Remove Valid": {
+      "main": [
+        [
+          {
+            "node": "DELETE /configs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DELETE /configs": {
+      "main": [
+        [
+          {
+            "node": "Format Remove",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Remove": {
+      "main": [
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Exclude": {
+      "main": [
+        [
+          {
+            "node": "IF Exclude Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Exclude Valid": {
+      "main": [
+        [
+          {
+            "node": "POST /exclude",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /exclude": {
+      "main": [
+        [
+          {
+            "node": "Format Exclude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Exclude": {
+      "main": [
+        [
+          {
+            "node": "Reply Telegram1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ba3f65ea-ddc9-43ef-85b8-f52c4478c098",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3cc6c4256e2bbdec1b3708c49dc3889c7266357f3e239651c157c2de760e6c65"
+  },
+  "id": "MW0QsOlUysz3QV1f",
+  "tags": []
+}
