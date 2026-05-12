@@ -1,6 +1,6 @@
 services:
   yambot-api:
-    image: tienhuynh/yambot-api:latest
+    image: ghcr.io/huynhnt/yambot:latest
     container_name: yambot-api
     ports:
       - "8080:8080"

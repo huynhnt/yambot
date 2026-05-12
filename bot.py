@@ -321,22 +321,42 @@ def track(entry_id=ALL_ENTRIES, send_email=True):
             for item in search_result:
                 if "exclude_items" in entry and item[KEY_ITEM_ID] in entry["exclude_items"]:
                     continue
+                alerted_ending_soon = last_search_result_dict.get(item[KEY_ITEM_ID], {}).get("alerted_ending_soon", False)
+
                 search_result_dict[item[KEY_ITEM_ID]] = {
                     KEY_CURRENT_PRICE: item[KEY_CURRENT_PRICE], 
-                    KEY_BID_COUNT: item[KEY_BID_COUNT]
+                    KEY_BID_COUNT: item[KEY_BID_COUNT],
+                    "alerted_ending_soon": alerted_ending_soon
                 }
+                
+                status_to_send = None
+                
                 if item[KEY_ITEM_ID] not in last_search_result_dict: # New
-                    email_entry_items.append((item, {"type": "new"}))
+                    status_to_send = {"type": "new"}
                 else: # Check for Modification
                     modification = {}
-                    for key in search_result_dict[item[KEY_ITEM_ID]]:
+                    for key in [KEY_CURRENT_PRICE, KEY_BID_COUNT]:
                         if key not in last_search_result_dict[item[KEY_ITEM_ID]]:
                             modification[key] = {"old": None, "new": search_result_dict[item[KEY_ITEM_ID]][key]}
                         elif search_result_dict[item[KEY_ITEM_ID]][key] != last_search_result_dict[item[KEY_ITEM_ID]][key]:
                             modification[key] = {"old": last_search_result_dict[item[KEY_ITEM_ID]][key], "new": search_result_dict[item[KEY_ITEM_ID]][key]}
                     
                     if modification:
-                        email_entry_items.append((item, {"type": "modified", "changes": modification}))
+                        status_to_send = {"type": "modified", "changes": modification}
+                
+                # Check ending soon
+                if KEY_END_TIMESTAMP in item:
+                    now_ts = int(datetime.now().timestamp())
+                    time_left = item[KEY_END_TIMESTAMP] - now_ts
+                    if 1800 <= time_left <= 3600 and not alerted_ending_soon:
+                        search_result_dict[item[KEY_ITEM_ID]]["alerted_ending_soon"] = True
+                        if status_to_send:
+                            status_to_send["ending_soon"] = True
+                        else:
+                            status_to_send = {"type": "ending_soon"}
+                            
+                if status_to_send:
+                    email_entry_items.append((item, status_to_send))
         else:
             raise ValueError("unknown site")
 
